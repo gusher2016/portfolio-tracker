@@ -3,7 +3,7 @@ import axios from 'axios'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, XAxis, YAxis } from 'recharts'
 import './App.css'
 
-const API_URL = 'http://localhost:8080'
+const API_URL = 'http://localhost:8080/api'
 
 const TIPOS = [
   { value: 'accion', label: 'Acción' },
