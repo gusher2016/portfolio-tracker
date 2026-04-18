@@ -1,0 +1,392 @@
+"""
+Argentine Investment Portfolio Tracker - Backend
+MVP with FastAPI + SQLite + yfinance
+"""
+
+import os
+import requests
+import json
+from datetime import datetime
+from typing import List, Optional, Dict
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+import yfinance as yf
+
+# BYMA API Endpoints
+BYMA_ENDPOINTS = {
+    "on": "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/negociable-obligations",
+    "cedear": "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/cedears",
+    "accion": "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/etf",
+    "bono": "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/public-bonds"
+}
+
+# Cache for BYMA prices (to avoid excessive API calls)
+byma_cache: Dict[str, Dict] = {}
+cache_timestamp: Optional[datetime] = None
+CACHE_DURATION_SECONDS = 60  # Cache prices for 1 minute
+
+# Database setup
+DATABASE_URL = "sqlite:///./portfolio.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Database Models (SQLAlchemy)
+class ActivoDB(Base):
+    __tablename__ = "activos"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tipo = Column(String, nullable=False)  # accion, cedear, bono, on, fci
+    ticker = Column(String, nullable=False)
+    nombre = Column(String, nullable=False)
+    cantidad = Column(Float, nullable=False)
+    precio_compra = Column(Float, nullable=False)
+    fecha_compra = Column(DateTime, default=datetime.now)
+    # For bonds/ONs - paridad, TIR, cotizacion BYMA
+    paridad = Column(Float, nullable=True)
+    tir = Column(Float, nullable=True)
+    cotizacion_byma = Column(Float, nullable=True)
+    # For FCI - valor cuotaparte
+    valor_cuotaparte = Column(Float, nullable=True)
+
+# Pydantic Models
+class ActivoCreate(BaseModel):
+    tipo: str
+    ticker: str
+    nombre: str
+    cantidad: float
+    precio_compra: float
+    fecha_compra: Optional[datetime] = None
+    paridad: Optional[float] = None
+    tir: Optional[float] = None
+    cotizacion_byma: Optional[float] = None
+    valor_cuotaparte: Optional[float] = None
+
+class ActivoResponse(BaseModel):
+    id: int
+    tipo: str
+    ticker: str
+    nombre: str
+    cantidad: float
+    precio_compra: float
+    fecha_compra: Optional[datetime]
+    paridad: Optional[float]
+    tir: Optional[float]
+    cotizacion_byma: Optional[float]
+    valor_cuotaparte: Optional[float]
+    precio_actual: Optional[float] = None
+    valorizacion: Optional[float] = None
+    ganancia_perdida: Optional[float] = None
+
+class PortfolioSummary(BaseModel):
+    total_invertido: float
+    valor_actual: float
+    ganancia_perdida: float
+    rendimiento_porcentaje: float
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Portfolio Argentino API", version="1.0.0")
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Helper function to get current price from Yahoo Finance
+def get_current_price(ticker: str) -> Optional[float]:
+    """Get current price from Yahoo Finance using yfinance"""
+    try:
+        # Argentine stocks use .BA suffix
+        if not ticker.endswith('.BA') and not ticker.endswith('.AR'):
+            ticker = f"{ticker}.BA"
+        
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        # Try different price keys
+        price = info.get('currentPrice') or info.get('regularMarketPrice')
+        if price:
+            return float(price)
+    except Exception as e:
+        print(f"Error fetching price for {ticker}: {e}")
+    return None
+
+# Mock BYMA prices (fallback if API fails)
+def get_mock_byma_price(ticker: str) -> float:
+    """Mock BYMA prices for demonstration"""
+    mock_prices = {
+        "AL30": 105.50,
+        "AL30D": 98.20,
+        "GD30": 112.30,
+        "GD30D": 102.50,
+        "TO21": 95.80,
+        "ON-PYGRAM": 98.00,
+        "ON-YPF": 101.50,
+    }
+    return mock_prices.get(ticker, 100.0)
+
+
+def fetch_byma_prices() -> Dict[str, Dict]:
+    """Fetch prices from BYMA API"""
+    global byma_cache, cache_timestamp
+    
+    # Check if cache is still valid
+    now = datetime.now()
+    if cache_timestamp and byma_cache:
+        time_diff = (now - cache_timestamp).total_seconds()
+        if time_diff < CACHE_DURATION_SECONDS:
+            return byma_cache
+    
+    # Fetch from BYMA API
+    byma_cache = {"on": {}, "cedear": {}, "accion": {}, "bono": {}}
+    
+    for tipo, url in BYMA_ENDPOINTS.items():
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                # Parse the response and extract ticker -> price mapping
+                if isinstance(data, list):
+                    for item in data:
+                        # Try different field names for ticker and price
+                        ticker = item.get("symbol") or item.get("ticker") or item.get("codigo") or item.get("instrument")
+                        price = item.get("lastPrice") or item.get("price") or item.get("ultimo") or item.get("close") or item.get("cotizacion")
+                        if ticker and price:
+                            byma_cache[tipo][ticker.upper()] = float(price)
+                print(f"Fetched {len(byma_cache[tipo])} {tipo} from BYMA API")
+            else:
+                print(f"BYMA API error for {tipo}: {response.status_code}")
+        except Exception as e:
+            print(f"Error fetching BYMA {tipo}: {e}")
+    
+    cache_timestamp = now
+    return byma_cache
+
+
+def get_byma_price(ticker: str, tipo: str) -> Optional[float]:
+    """Get price from BYMA API for a specific ticker and type"""
+    prices = fetch_byma_prices()
+    ticker_upper = ticker.upper()
+    
+    # Try exact match first
+    if ticker_upper in prices.get(tipo, {}):
+        return prices[tipo][ticker_upper]
+    
+    # Try partial match (ticker might be in the symbol)
+    tipo_prices = prices.get(tipo, {})
+    for symbol, price in tipo_prices.items():
+        if ticker_upper in symbol or symbol in ticker_upper:
+            return price
+    
+    return None
+
+# API Endpoints
+@app.get("/")
+def read_root():
+    return {"message": "Portfolio Argentino API", "version": "1.0.0"}
+
+@app.get("/api/activos", response_model=List[ActivoResponse])
+def list_activos(db: Session = Depends(get_db)):
+    """List all investments with current valuations"""
+    activos = db.query(ActivoDB).all()
+    result = []
+    
+    for activo in activos:
+        # Get current price based on type
+        precio_actual = None
+        
+        if activo.tipo in ["accion", "cedear"]:
+            # Try Yahoo Finance first, then BYMA
+            precio_actual = get_current_price(activo.ticker)
+            if not precio_actual:
+                precio_actual = get_byma_price(activo.ticker, activo.tipo)
+        elif activo.tipo in ["bono", "on"]:
+            # Use BYMA price or paridad * 100 for bonds
+            if activo.cotizacion_byma:
+                precio_actual = activo.cotizacion_byma
+            elif activo.paridad:
+                precio_actual = activo.paridad * 100
+            else:
+                # Try BYMA API first, fallback to mock
+                precio_actual = get_byma_price(activo.ticker, activo.tipo)
+                if not precio_actual:
+                    precio_actual = get_mock_byma_price(activo.ticker)
+        elif activo.tipo == "fci":
+            # Use cuotaparte value for FCI
+            precio_actual = activo.valor_cuotaparte or get_mock_byma_price(activo.ticker)
+        
+        # Calculate values
+        valorizacion = activo.cantidad * (precio_actual or activo.precio_compra)
+        ganancia_perdida = valorizacion - (activo.cantidad * activo.precio_compra)
+        
+        activo_response = ActivoResponse(
+            id=activo.id,
+            tipo=activo.tipo,
+            ticker=activo.ticker,
+            nombre=activo.nombre,
+            cantidad=activo.cantidad,
+            precio_compra=activo.precio_compra,
+            fecha_compra=activo.fecha_compra,
+            paridad=activo.paridad,
+            tir=activo.tir,
+            cotizacion_byma=activo.cotizacion_byma,
+            valor_cuotaparte=activo.valor_cuotaparte,
+            precio_actual=precio_actual,
+            valorizacion=round(valorizacion, 2),
+            ganancia_perdida=round(ganancia_perdida, 2)
+        )
+        result.append(activo_response)
+    
+    return result
+
+@app.post("/api/activos", response_model=ActivoResponse)
+def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
+    """Create a new investment"""
+    db_activo = ActivoDB(
+        tipo=activo.tipo,
+        ticker=activo.ticker,
+        nombre=activo.nombre,
+        cantidad=activo.cantidad,
+        precio_compra=activo.precio_compra,
+        fecha_compra=activo.fecha_compra or datetime.now(),
+        paridad=activo.paridad,
+        tir=activo.tir,
+        cotizacion_byma=activo.cotizacion_byma,
+        valor_cuotaparte=activo.valor_cuotaparte
+    )
+    db.add(db_activo)
+    db.commit()
+    db.refresh(db_activo)
+    
+    # Return with calculated values
+    precio_actual = None
+    if db_activo.tipo in ["accion", "cedear"]:
+        precio_actual = get_current_price(db_activo.ticker)
+    elif db_activo.tipo in ["bono", "on"]:
+        precio_actual = db_activo.cotizacion_byma or (db_activo.paridad * 100 if db_activo.paridad else None)
+    elif db_activo.tipo == "fci":
+        precio_actual = db_activo.valor_cuotaparte
+    
+    valorizacion = db_activo.cantidad * (precio_actual or db_activo.precio_compra)
+    
+    return ActivoResponse(
+        id=db_activo.id,
+        tipo=db_activo.tipo,
+        ticker=db_activo.ticker,
+        nombre=db_activo.nombre,
+        cantidad=db_activo.cantidad,
+        precio_compra=db_activo.precio_compra,
+        fecha_compra=db_activo.fecha_compra,
+        paridad=db_activo.paridad,
+        tir=db_activo.tir,
+        cotizacion_byma=db_activo.cotizacion_byma,
+        valor_cuotaparte=db_activo.valor_cuotaparte,
+        precio_actual=precio_actual,
+        valorizacion=round(valorizacion, 2),
+        ganancia_perdida=round(valorizacion - (db_activo.cantidad * db_activo.precio_compra), 2)
+    )
+
+@app.get("/api/portfolio/summary", response_model=PortfolioSummary)
+def get_portfolio_summary(db: Session = Depends(get_db)):
+    """Get portfolio summary with total invested and current value"""
+    activos = db.query(ActivoDB).all()
+    
+    total_invertido = 0
+    valor_actual = 0
+    
+    for activo in activos:
+        total_invertido += activo.cantidad * activo.precio_compra
+        
+        precio_actual = None
+        if activo.tipo in ["accion", "cedear"]:
+            precio_actual = get_current_price(activo.ticker)
+            if not precio_actual:
+                precio_actual = get_byma_price(activo.ticker, activo.tipo)
+        elif activo.tipo in ["bono", "on"]:
+            precio_actual = activo.cotizacion_byma or (activo.paridad * 100 if activo.paridad else activo.precio_compra)
+            if not precio_actual or precio_actual == activo.precio_compra:
+                byma_price = get_byma_price(activo.ticker, activo.tipo)
+                precio_actual = byma_price or activo.precio_compra
+        elif activo.tipo == "fci":
+            precio_actual = activo.valor_cuotaparte or activo.precio_compra
+        
+        valor_actual += activo.cantidad * (precio_actual or activo.precio_compra)
+    
+    ganancia_perdida = valor_actual - total_invertido
+    rendimiento = (ganancia_perdida / total_invertido * 100) if total_invertido > 0 else 0
+    
+    return PortfolioSummary(
+        total_invertido=round(total_invertido, 2),
+        valor_actual=round(valor_actual, 2),
+        ganancia_perdida=round(ganancia_perdida, 2),
+        rendimiento_porcentaje=round(rendimiento, 2)
+    )
+
+@app.get("/api/portfolio/by-type")
+def get_portfolio_by_type(db: Session = Depends(get_db)):
+    """Get portfolio distribution by type"""
+    activos = db.query(ActivoDB).all()
+    
+    distribution = {}
+    
+    for activo in activos:
+        tipo = activo.tipo
+        valor = activo.cantidad * activo.precio_compra
+        
+        if tipo in distribution:
+            distribution[tipo] += valor
+        else:
+            distribution[tipo] = valor
+    
+    return [{"tipo": k, "valor": round(v, 2)} for k, v in distribution.items()]
+
+
+@app.get("/api/portfolio/exchange-rate")
+def get_exchange_rate():
+    """Get USD to ARS exchange rate"""
+    try:
+        response = requests.get("https://open.er-api.com/v6/latest/USD", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return {"rate": data["rates"]["ARS"], "currency": "ARS"}
+    except Exception as e:
+        print(f"Error fetching exchange rate: {e}")
+    # Fallback to a reasonable default
+    return {"rate": 1360.0, "currency": "ARS"}
+
+
+@app.delete("/api/activos/{activo_id}")
+def delete_activo(activo_id: int, db: Session = Depends(get_db)):
+    """Delete an investment"""
+    activo = db.query(ActivoDB).filter(ActivoDB.id == activo_id).first()
+    if not activo:
+        raise HTTPException(status_code=404, detail="Activo no encontrado")
+    
+    db.delete(activo)
+    db.commit()
+    return {"message": "Activo eliminado"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
