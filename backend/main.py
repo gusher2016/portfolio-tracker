@@ -13,6 +13,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
+
+# Cache for BYMA/Rava prices
+rava_cache = {}
+rava_cache_timestamp = None
+CACHE_DURATION_SECONDS = 300  # 5 minutes
 from sqlalchemy.orm import sessionmaker, Session
 import yfinance as yf
 
@@ -211,6 +216,65 @@ def get_byma_price(ticker: str, tipo: str) -> Optional[float]:
     
     return None
 
+
+def fetch_rava_prices() -> Dict[str, Dict]:
+    """Fetch prices from Rava API (free Argentine financial data)"""
+    global rava_cache, rava_cache_timestamp
+    
+    now = datetime.now()
+    if rava_cache_timestamp and rava_cache:
+        time_diff = (now - rava_cache_timestamp).total_seconds()
+        if time_diff < CACHE_DURATION_SECONDS:
+            return rava_cache
+    
+    rava_cache = {"bono": {}, "on": {}, "fci": {}}
+    
+    try:
+        # Rava bonds endpoint
+        url = "https://services.rava.com.ar/symbols/"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and "bonos" in data:
+                for item in data["bonos"]:
+                    ticker = item.get("simbolo", "")
+                    price = item.get("ultimo", item.get("cierre", 0))
+                    if ticker and price:
+                        rava_cache["bono"][ticker.upper()] = float(price)
+            if isinstance(data, dict) and "obligaciones" in data:
+                for item in data["obligaciones"]:
+                    ticker = item.get("simbolo", "")
+                    price = item.get("ultimo", item.get("cierre", 0))
+                    if ticker and price:
+                        rava_cache["on"][ticker.upper()] = float(price)
+            print(f"Fetched {len(rava_cache['bono'])} bonds from Rava")
+        else:
+            print(f"Rava API error: {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching Rava prices: {e}")
+    
+    rava_cache_timestamp = now
+    return rava_cache
+
+
+def get_rava_price(ticker: str, tipo: str) -> Optional[float]:
+    """Get price from Rava API for a specific ticker"""
+    prices = fetch_rava_prices()
+    ticker_upper = ticker.upper()
+    
+    if ticker_upper in prices.get(tipo, {}):
+        return prices[tipo][ticker_upper]
+    
+    # Try partial match
+    tipo_prices = prices.get(tipo, {})
+    for symbol, price in tipo_prices.items():
+        if ticker_upper in symbol or symbol in ticker_upper:
+            return price
+    
+    return None
+
 # API Endpoints
 @app.get("/")
 def read_root():
@@ -226,39 +290,41 @@ def list_activos(db: Session = Depends(get_db)):
     for activo in activos:
         # Get current price based on type
         precio_actual = None
-        precio_from_yahoo = False
         
         if activo.tipo in ["accion", "cedear"]:
-            # Try Yahoo Finance first, then BYMA
-            precio_actual = get_current_price(activo.ticker)  # Returns ARS
-            if precio_actual:
-                precio_from_yahoo = True
-            else:
-                precio_actual = get_byma_price(activo.ticker, activo.tipo)  # Returns USD
-        elif activo.tipo in ["bono", "on"]:
-            # Use BYMA price or paridad * 100 for bonds - these are in USD
-            if activo.cotizacion_byma:
-                precio_actual = activo.cotizacion_byma
-            elif activo.paridad:
-                precio_actual = activo.paridad * 100
-            else:
-                # Try BYMA API first, fallback to mock
+            # Try Yahoo Finance first
+            precio_actual = get_current_price(activo.ticker)
+            if not precio_actual:
+                # Try BYMA as fallback
                 precio_actual = get_byma_price(activo.ticker, activo.tipo)
-                if not precio_actual:
-                    precio_actual = get_mock_byma_price(activo.ticker)
+        elif activo.tipo in ["bono", "on"]:
+            # For bonds, try BYMA first, then Rava
+            precio_actual = get_byma_price(activo.ticker, activo.tipo)
+            if not precio_actual:
+                precio_actual = get_rava_price(activo.ticker, activo.tipo)
+            # Also check database fields
+            if not precio_actual and activo.cotizacion_byma:
+                precio_actual = activo.cotizacion_byma
+            elif not precio_actual and activo.paridad:
+                precio_actual = activo.paridad * 100
         elif activo.tipo == "fci":
-            # Use cuotaparte value for FCI - in USD
-            precio_actual = activo.valor_cuotaparte or get_mock_byma_price(activo.ticker)
+            precio_actual = activo.valor_cuotaparte
+        
+        # If no price available, raise error
+        if precio_actual is None or precio_actual == 0:
+            raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}. Verifique que el ticker exista en Yahoo Finance (ej: GGAL.BA), BYMA o Rava.")
         
         precio_actual = precio_actual or 0
         
-        # Convert to both currencies - Yahoo returns ARS, BYMA/bonds return USD
+        # Convert to both currencies - all in ARS
         if precio_from_yahoo:
+            # Yahoo .BA price is in ARS
             precio_actual_ars = precio_actual
             precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
         else:
-            precio_actual_usd = precio_actual
-            precio_actual_ars = precio_actual * exchange_rate
+            # BYMA/bond/FCI prices are in ARS (not USD)
+            precio_actual_ars = precio_actual
+            precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
         
         # Valorización
         valorizacion_usd = activo.cantidad * precio_actual_usd
@@ -330,16 +396,14 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
     
     precio_actual = precio_actual or 0
     
-    # Convert to both currencies
-    # Yahoo .BA returns ARS, BYMA/bonds/FCI returns USD
+    # Convert to both currencies - all prices in ARS
     if precio_from_yahoo:
-        # Yahoo price is in ARS
         precio_actual_ars = precio_actual
         precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
     else:
-        # BYMA/bond/FCI prices are in USD
-        precio_actual_usd = precio_actual
-        precio_actual_ars = precio_actual * exchange_rate
+        # BYMA/bond/FCI prices are in ARS
+        precio_actual_ars = precio_actual
+        precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
     valorizacion_usd = db_activo.cantidad * precio_actual_usd
     valorizacion_ars = db_activo.cantidad * precio_actual_ars
     ganancia_perdida_usd = valorizacion_usd - (db_activo.cantidad * db_activo.precio_compra_usd)
@@ -384,36 +448,30 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
         total_invertido_ars += activo.cantidad * activo.precio_compra_ars
         total_invertido_usd += activo.cantidad * activo.precio_compra_usd
         
-        # Get current price
+        # Get current price - all in ARS now
         # For acciones/cedears: Yahoo .BA returns ARS
-        # For bonos/ONs/FCI: prices are in USD
+        # For bonos/ONs/FCI: BYMA prices are in ARS
         precio_actual = None
-        precio_from_yahoo = False
         if activo.tipo in ["accion", "cedear"]:
-            precio_actual = get_current_price(activo.ticker)  # This is in ARS
-            if precio_actual:
-                precio_from_yahoo = True
-            else:
-                precio_actual = get_byma_price(activo.ticker, activo.tipo)  # This is in USD
+            precio_actual = get_current_price(activo.ticker)  # Returns ARS
         elif activo.tipo in ["bono", "on"]:
-            precio_actual = activo.cotizacion_byma or (activo.paridad * 100 if activo.paridad else activo.precio_compra_usd)
+            # Use BYMA price or paridad * 100 - in ARS
+            precio_actual = activo.cotizacion_byma or (activo.paridad * 100 if activo.paridad else None)
             if not precio_actual:
                 byma_price = get_byma_price(activo.ticker, activo.tipo)
-                precio_actual = byma_price or activo.precio_compra_usd
+                precio_actual = byma_price
         elif activo.tipo == "fci":
-            precio_actual = activo.valor_cuotaparte or activo.precio_compra_usd
+            precio_actual = activo.valor_cuotaparte  # In ARS
+        
+        # If no price available, raise error
+        if precio_actual is None or precio_actual == 0:
+            raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}")
         
         precio_actual = precio_actual or 0
         
-        # Convert to both currencies
-        if precio_from_yahoo:
-            # Yahoo price is in ARS
-            precio_actual_ars = precio_actual
-            precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
-        else:
-            # BYMA/bond/FCI prices are in USD
-            precio_actual_usd = precio_actual
-            precio_actual_ars = precio_actual * exchange_rate
+        # All prices are in ARS, convert to USD
+        precio_actual_ars = precio_actual
+        precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
         
         # Valorización en USD y ARS
         valor_actual_usd += activo.cantidad * precio_actual_usd
@@ -450,9 +508,10 @@ def get_portfolio_by_type(db: Session = Depends(get_db)):
         precio_actual = 0
         
         if tipo in ["accion", "cedear"]:
-            # Yahoo returns ARS, treat as ARS
+            # Yahoo returns ARS
             precio_actual = get_current_price(activo.ticker) or 0
         elif tipo in ["bono", "on"]:
+            # BYMA prices are in ARS
             if activo.cotizacion_byma:
                 precio_actual = activo.cotizacion_byma
             elif activo.paridad:
@@ -460,13 +519,8 @@ def get_portfolio_by_type(db: Session = Depends(get_db)):
         elif tipo == "fci":
             precio_actual = activo.valor_cuotaparte or 0
         
-        # Calculate value in USD (convert ARS to USD for acciones/cedears)
-        if tipo in ["accion", "cedear"]:
-            # Yahoo price is in ARS
-            valor = activo.cantidad * (precio_actual / exchange_rate if exchange_rate else 0)
-        else:
-            # BYMA prices are in USD
-            valor = activo.cantidad * precio_actual
+        # All prices in ARS, convert to USD for display
+        valor = activo.cantidad * (precio_actual / exchange_rate if exchange_rate else 0)
         
         if tipo in distribution:
             distribution[tipo] += valor
