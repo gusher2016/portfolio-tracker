@@ -15,7 +15,16 @@ const TIPOS = [
 
 function App() {
   const [activos, setActivos] = useState([])
-  const [summary, setSummary] = useState({ total_invertido: 0, valor_actual: 0, ganancia_perdida: 0, rendimiento_porcentaje: 0 })
+  const [summary, setSummary] = useState({ 
+    total_invertido_ars: 0, 
+    total_invertido_usd: 0,
+    valor_actual_ars: 0, 
+    valor_actual_usd: 0,
+    ganancia_perdida_ars: 0,
+    ganancia_perdida_usd: 0,
+    rendimiento_porcentaje_ars: 0,
+    rendimiento_porcentaje_usd: 0
+  })
   const [distribution, setDistribution] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -239,23 +248,23 @@ function App() {
 
       <div className="summary-cards">
         <div className="card">
-          <h3>Total Invertido</h3>
-          <p className="value">{formatCurrency(summary.total_invertido)}</p>
+          <h3>Total Invertido ({currency})</h3>
+          <p className="value">{formatCurrency(currency === 'ARS' ? summary.total_invertido_ars : summary.total_invertido_usd)}</p>
         </div>
         <div className="card">
-          <h3>Valor Actual</h3>
-          <p className="value">{formatCurrency(summary.valor_actual)}</p>
+          <h3>Valor Actual ({currency})</h3>
+          <p className="value">{formatCurrency(currency === 'ARS' ? summary.valor_actual_ars : summary.valor_actual_usd)}</p>
         </div>
         <div className="card">
-          <h3>Ganancia/Pérdida</h3>
-          <p className={`value ${summary.ganancia_perdida >= 0 ? 'positive' : 'negative'}`}>
-            {formatCurrency(summary.ganancia_perdida)}
+          <h3>Ganancia/Pérdida ({currency})</h3>
+          <p className={`value ${(currency === 'ARS' ? summary.ganancia_perdida_ars : summary.ganancia_perdida_usd) >= 0 ? 'positive' : 'negative'}`}>
+            {formatCurrency(currency === 'ARS' ? summary.ganancia_perdida_ars : summary.ganancia_perdida_usd)}
           </p>
         </div>
         <div className="card">
-          <h3>Rendimiento</h3>
-          <p className={`value ${summary.rendimiento_porcentaje >= 0 ? 'positive' : 'negative'}`}>
-            {summary.rendimiento_porcentaje.toFixed(2)}%
+          <h3>Rendimiento (%)</h3>
+          <p className={`value ${(currency === 'ARS' ? summary.rendimiento_porcentaje_ars : summary.rendimiento_porcentaje_usd) >= 0 ? 'positive' : 'negative'}`}>
+            {(currency === 'ARS' ? summary.rendimiento_porcentaje_ars : summary.rendimiento_porcentaje_usd).toFixed(2)}%
           </p>
         </div>
       </div>
