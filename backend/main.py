@@ -20,6 +20,10 @@ rava_cache_timestamp = None
 CACHE_DURATION_SECONDS = 300  # 5 minutes
 from sqlalchemy.orm import sessionmaker, Session
 import yfinance as yf
+import urllib3
+
+# Suppress SSL warning (for BYMA API with cert issues)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # BYMA API Endpoints
 BYMA_ENDPOINTS = {
@@ -175,20 +179,28 @@ def fetch_byma_prices() -> Dict[str, Dict]:
     for tipo, url in BYMA_ENDPOINTS.items():
         try:
             headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0"
             }
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.post(
+                url,
+                json={"excludeZeroVolume": False},
+                headers=headers,
+                timeout=30,
+                verify=False  # Ignore SSL cert issues
+            )
+            
             if response.status_code == 200:
                 data = response.json()
-                # Parse the response and extract ticker -> price mapping
-                if isinstance(data, list):
-                    for item in data:
-                        # Try different field names for ticker and price
-                        ticker = item.get("symbol") or item.get("ticker") or item.get("codigo") or item.get("instrument")
-                        price = item.get("lastPrice") or item.get("price") or item.get("ultimo") or item.get("close") or item.get("cotizacion")
-                        if ticker and price:
-                            byma_cache[tipo][ticker.upper()] = float(price)
+                instruments = data if isinstance(data, list) else data.get("data", [])
+                
+                for inst in instruments:
+                    symbol = inst.get("symbol", "").strip().upper()
+                    if symbol:
+                        # Priority: trade > settlementPrice > previousClosingPrice
+                        price = inst.get("trade") or inst.get("settlementPrice") or inst.get("previousClosingPrice")
+                        if price and float(price) > 0:
+                            byma_cache[tipo][symbol] = float(price)
                 print(f"Fetched {len(byma_cache[tipo])} {tipo} from BYMA API")
             else:
                 print(f"BYMA API error for {tipo}: {response.status_code}")
@@ -316,15 +328,9 @@ def list_activos(db: Session = Depends(get_db)):
         
         precio_actual = precio_actual or 0
         
-        # Convert to both currencies - all in ARS
-        if precio_from_yahoo:
-            # Yahoo .BA price is in ARS
-            precio_actual_ars = precio_actual
-            precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
-        else:
-            # BYMA/bond/FCI prices are in ARS (not USD)
-            precio_actual_ars = precio_actual
-            precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
+        # Convert to both currencies - all prices in ARS
+        precio_actual_ars = precio_actual
+        precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
         
         # Valorización
         valorizacion_usd = activo.cantidad * precio_actual_usd
