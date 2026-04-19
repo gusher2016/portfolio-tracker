@@ -215,11 +215,18 @@ function App() {
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8']
 
-  const formatCurrency = (value, forceCurrency = null) => {
+  const formatCurrency = (value, forceCurrency = null, skipConversion = false) => {
     const curr = forceCurrency || currency
-    if (curr === 'USD') {
+    // Skip conversion for pre-calculated USD values or when forceCurrency is USD and value is already in USD
+    if (!skipConversion && curr === 'USD' && value > 100) {
+      // Values > 100 are likely ARS (like stock prices), need conversion
       value = value / exchangeRate
     }
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: curr }).format(value)
+  }
+  
+  // Format a value that's already in the target currency (no conversion)
+  const formatDirect = (value, curr) => {
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: curr }).format(value)
   }
 
@@ -372,20 +379,20 @@ function App() {
                       <td>{activo.cantidad.toFixed(2)}</td>
                       {currency === 'ARS' ? (
                         <>
-                          <td>{formatCurrency(activo.precio_compra_ars)}</td>
-                          <td>{activo.precio_actual_ars ? formatCurrency(activo.precio_actual_ars) : '-'}</td>
-                          <td>{formatCurrency(activo.valorizacion_ars || 0)}</td>
+                          <td>{formatDirect(activo.precio_compra_ars, 'ARS')}</td>
+                          <td>{activo.precio_actual_ars ? formatDirect(activo.precio_actual_ars, 'ARS') : '-'}</td>
+                          <td>{formatDirect(activo.valorizacion_ars || 0, 'ARS')}</td>
                           <td className={activo.ganancia_perdida_ars >= 0 ? 'positive' : 'negative'}>
-                            {formatCurrency(activo.ganancia_perdida_ars || 0)}
+                            {formatDirect(activo.ganancia_perdida_ars || 0, 'ARS')}
                           </td>
                         </>
                       ) : (
                         <>
-                          <td>{formatCurrency(activo.precio_compra_usd)}</td>
-                          <td>{activo.precio_actual_usd ? formatCurrency(activo.precio_actual_usd) : '-'}</td>
-                          <td>{formatCurrency(activo.valorizacion_usd || 0)}</td>
+                          <td>{formatDirect(activo.precio_compra_usd, 'USD')}</td>
+                          <td>{activo.precio_actual_usd ? formatDirect(activo.precio_actual_usd, 'USD') : '-'}</td>
+                          <td>{formatDirect(activo.valorizacion_usd || 0, 'USD')}</td>
                           <td className={activo.ganancia_perdida_usd >= 0 ? 'positive' : 'negative'}>
-                            {formatCurrency(activo.ganancia_perdida_usd || 0)}
+                            {formatDirect(activo.ganancia_perdida_usd || 0, 'USD')}
                           </td>
                         </>
                       )}
