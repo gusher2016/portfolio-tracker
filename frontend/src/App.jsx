@@ -91,19 +91,24 @@ function App() {
     if (!ticker || !tipo || ticker.length < 2) return
     
     try {
-      // Fetch price
-      const priceRes = await axios.get(`${API_URL}/price-lookup`, {
-        params: { ticker: ticker.toUpperCase(), tipo }
-      })
+      // Fetch price and exchange rate in parallel
+      const [priceRes, rateRes, activoRes] = await Promise.all([
+        axios.get(`${API_URL}/price-lookup`, { params: { ticker: ticker.toUpperCase(), tipo } }),
+        axios.get(`${API_URL}/portfolio/exchange-rate`),
+        axios.get(`${API_URL}/activos`)
+      ])
       
-      // Fetch name from existing activo if available
-      const activoRes = await axios.get(`${API_URL}/activos`)
+      const exchangeRate = rateRes.data.rate || 1360
       const existing = activoRes.data.find(a => a.ticker.toUpperCase() === ticker.toUpperCase() && a.tipo === tipo)
       
-      // Always update price (allow overwriting) and name if empty
+      const precioARS = priceRes.data.precio
+      const precioUSD = precioARS ? (precioARS / exchangeRate).toFixed(2) : ''
+      
+      // Always update price and name
       setFormData(prev => ({
         ...prev,
-        precio_compra_ars: priceRes.data.precio ? priceRes.data.precio.toFixed(2) : prev.precio_compra_ars,
+        precio_compra_ars: precioARS ? precioARS.toFixed(2) : prev.precio_compra_ars,
+        precio_compra_usd: precioUSD || prev.precio_compra_usd,
         nombre: (existing?.nombre) || (ticker.length >= 3 ? ticker.toUpperCase() : prev.nombre) || prev.nombre
       }))
     } catch (err) {
