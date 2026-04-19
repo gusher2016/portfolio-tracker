@@ -408,12 +408,25 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
 def get_portfolio_by_type(db: Session = Depends(get_db)):
     """Get portfolio distribution by type"""
     activos = db.query(ActivoDB).all()
-    
     distribution = {}
     
     for activo in activos:
         tipo = activo.tipo
-        valor = activo.cantidad * activo.precio_compra
+        # Get current price in USD
+        precio_actual = 0
+        
+        if tipo in ["accion", "cedear"]:
+            precio_actual = get_current_price(activo.ticker) or 0
+        elif tipo in ["bono", "on"]:
+            if activo.cotizacion_byma:
+                precio_actual = activo.cotizacion_byma
+            elif activo.paridad:
+                precio_actual = activo.paridad * 100
+        elif tipo == "fci":
+            precio_actual = activo.valor_cuotaparte or 0
+        
+        # Calculate value in USD
+        valor = activo.cantidad * precio_actual
         
         if tipo in distribution:
             distribution[tipo] += valor
