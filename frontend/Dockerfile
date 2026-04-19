@@ -8,8 +8,11 @@ RUN npm install -g serve
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies - use CI=true to avoid interactive prompts
-RUN npm ci --legacy-peer-deps
+# Install dependencies with legacy-peer-deps
+RUN npm install --legacy-peer-deps
+
+# Copy source files
+COPY . .
 
 # Build the React app
 RUN npm run build
