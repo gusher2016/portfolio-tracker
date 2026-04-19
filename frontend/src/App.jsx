@@ -3,7 +3,7 @@ import axios from 'axios'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, XAxis, YAxis } from 'recharts'
 import './App.css'
 
-const API_URL = 'http://localhost:8080/api'
+const API_URL = 'http://localhost:8080'
 
 const TIPOS = [
   { value: 'accion', label: 'Acción' },
@@ -47,12 +47,12 @@ function App() {
       setLoading(true)
       
       // Fetch exchange rate first
-      const rateRes = await axios.get(`${API_URL}/api/portfolio/exchange-rate`)
+      const rateRes = await axios.get(`${API_URL}/portfolio/exchange-rate`)
       setExchangeRate(rateRes.data.rate || 1360.0)
       const [activosRes, summaryRes, distRes] = await Promise.all([
-        axios.get(`${API_URL}/api/activos`),
-        axios.get(`${API_URL}/api/portfolio/summary`),
-        axios.get(`${API_URL}/api/portfolio/by-type`)
+        axios.get(`${API_URL}/activos`),
+        axios.get(`${API_URL}/portfolio/summary`),
+        axios.get(`${API_URL}/portfolio/by-type`)
       ])
       setActivos(activosRes.data)
       setSummary(summaryRes.data)
@@ -130,10 +130,10 @@ function App() {
 
       if (editingActivo) {
         // Delete and recreate (simplest update approach for MVP)
-        await axios.delete(`${API_URL}/api/activos/${editingActivo.id}`)
+        await axios.delete(`${API_URL}/activos/${editingActivo.id}`)
       }
       
-      await axios.post(`${API_URL}/api/activos`, payload)
+      await axios.post(`${API_URL}/activos`, payload)
       
       setShowModal(false)
       fetchData()
@@ -149,7 +149,7 @@ function App() {
     if (!confirm('¿Estás seguro de que deseas eliminar esta inversión?')) return
     
     try {
-      await axios.delete(`${API_URL}/api/activos/${id}`)
+      await axios.delete(`${API_URL}/activos/${id}`)
       fetchData()
     } catch (err) {
       alert('Error al eliminar: ' + err.message)
