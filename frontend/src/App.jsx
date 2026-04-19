@@ -86,29 +86,47 @@ function App() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
   
-  // Fetch price from backend when ticker/tipo changes
+  // Fetch price and name from backend when ticker/tipo changes
   const fetchPriceFromBackend = async (ticker, tipo) => {
+    if (!ticker || !tipo) return
+    
     try {
-      const res = await axios.get(`${API_URL}/price-lookup`, {
+      // Fetch price
+      const priceRes = await axios.get(`${API_URL}/price-lookup`, {
         params: { ticker: ticker.toUpperCase(), tipo }
       })
-      if (res.data.precio) {
-        // Fill precio_compra_ars with the current price from BYMA
-        setFormData(prev => ({ 
-          ...prev, 
-          precio_compra_ars: res.data.precio.toFixed(2)
-        }))
+      
+      // Fetch name from existing activo if available, or use ticker as name
+      const activoRes = await axios.get(`${API_URL}/activos`)
+      const existing = activoRes.data.find(a => a.ticker.toUpperCase() === ticker.toUpperCase() && a.tipo === tipo)
+      
+      const updates = {}
+      if (priceRes.data.precio) {
+        updates.precio_compra_ars = priceRes.data.precio.toFixed(2)
+      }
+      if (existing && existing.nombre) {
+        updates.nombre = existing.nombre
+      } else if (ticker.length >= 3) {
+        // Default name from ticker if not found
+        updates.nombre = ticker.toUpperCase()
+      }
+      
+      if (Object.keys(updates).length > 0) {
+        setFormData(prev => ({ ...prev, ...updates }))
       }
     } catch (err) {
       console.log('Price lookup failed:', err.message)
     }
   }
   
-  // Fetch price when ticker or tipo changes in form
+  // Fetch price when ticker or tipo changes in form (with debounce)
   useEffect(() => {
-    if (formData.ticker && formData.tipo) {
-      fetchPriceFromBackend(formData.ticker, formData.tipo)
-    }
+    const timer = setTimeout(() => {
+      if (formData.ticker && formData.tipo && formData.ticker.length >= 2) {
+        fetchPriceFromBackend(formData.ticker, formData.tipo)
+      }
+    }, 500) // Debounce 500ms
+    return () => clearTimeout(timer)
   }, [formData.ticker, formData.tipo])
 
   // Open modal for new investment

@@ -79,6 +79,11 @@
 - Los tickers de ONs no están disponibles en BYMA (ej: YPFD no existe en la API)
 - Permitimos entrada manual de precio (valor 0 permitido)
 
+### 8. Autocompletar precio en formulario
+- ✅ Implementado: al escribir ticker + tipo, se busca precio en BYMA
+- Nuevo endpoint: `/api/price-lookup?ticker=X&tipo=Y`
+- El precio se filled en "Precio compra ARS" y puede ser modificado por el usuario
+
 ---
 
 ## 🔧 Comandos Útiles
