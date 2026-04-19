@@ -28,7 +28,8 @@ function App() {
     ticker: '',
     nombre: '',
     cantidad: '',
-    precio_compra: '',
+    precio_compra_ars: '',
+    precio_compra_usd: '',
     paridad: '',
     tir: '',
     cotizacion_byma: '',
@@ -84,7 +85,8 @@ function App() {
       ticker: '',
       nombre: '',
       cantidad: '',
-      precio_compra: '',
+      precio_compra_ars: '',
+      precio_compra_usd: '',
       paridad: '',
       tir: '',
       cotizacion_byma: '',
@@ -101,7 +103,8 @@ function App() {
       ticker: activo.ticker,
       nombre: activo.nombre,
       cantidad: activo.cantidad,
-      precio_compra: activo.precio_compra,
+      precio_compra_ars: activo.precio_compra_ars,
+      precio_compra_usd: activo.precio_compra_usd,
       paridad: activo.paridad || '',
       tir: activo.tir || '',
       cotizacion_byma: activo.cotizacion_byma || '',
@@ -121,7 +124,8 @@ function App() {
         ticker: formData.ticker.toUpperCase(),
         nombre: formData.nombre,
         cantidad: parseFloat(formData.cantidad),
-        precio_compra: parseFloat(formData.precio_compra),
+        precio_compra_ars: parseFloat(formData.precio_compra_ars),
+        precio_compra_usd: parseFloat(formData.precio_compra_usd),
         ...(formData.paridad && { paridad: parseFloat(formData.paridad) }),
         ...(formData.tir && { tir: parseFloat(formData.tir) }),
         ...(formData.cotizacion_byma && { cotizacion_byma: parseFloat(formData.cotizacion_byma) }),
@@ -299,10 +303,11 @@ function App() {
                     <th>Ticker</th>
                     <th>Nombre</th>
                     <th>Cantidad</th>
-                    <th>Precio Compra</th>
-                    <th>Precio Actual</th>
-                    <th>Valorización</th>
-                    <th>G/P</th>
+                    <th>Precio Compra ARS</th>
+                    <th>Precio Compra USD</th>
+                    <th>Precio Actual USD</th>
+                    <th>Valorización USD</th>
+                    <th>G/P USD</th>
                     <th>Acciones</th>
                   </tr>
                 </thead>
@@ -313,11 +318,12 @@ function App() {
                       <td>{activo.ticker}</td>
                       <td>{activo.nombre}</td>
                       <td>{activo.cantidad.toFixed(2)}</td>
-                      <td>{formatCurrency(activo.precio_compra)}</td>
-                      <td>{activo.precio_actual ? formatCurrency(activo.precio_actual) : '-'}</td>
-                      <td>{formatCurrency(activo.valorizacion || 0)}</td>
-                      <td className={activo.ganancia_perdida >= 0 ? 'positive' : 'negative'}>
-                        {formatCurrency(activo.ganancia_perdida || 0)}
+                      <td>{formatCurrency(activo.precio_compra_ars)}</td>
+                      <td>{formatCurrency(activo.precio_compra_usd)}</td>
+                      <td>{activo.precio_actual_usd ? formatCurrency(activo.precio_actual_usd) : '-'}</td>
+                      <td>{formatCurrency(activo.valorizacion_usd || 0)}</td>
+                      <td className={activo.ganancia_perdida_usd >= 0 ? 'positive' : 'negative'}>
+                        {formatCurrency(activo.ganancia_perdida_usd || 0)}
                       </td>
                       <td>
                         <div className="action-buttons">
@@ -367,9 +373,16 @@ function App() {
                   <label>Cantidad</label>
                   <input type="number" name="cantidad" value={formData.cantidad} onChange={handleInputChange} required step="0.01" placeholder="100" />
                 </div>
+              </div>
+              
+              <div className="form-row">
                 <div className="form-group">
-                  <label>Precio de Compra</label>
-                  <input type="number" name="precio_compra" value={formData.precio_compra} onChange={handleInputChange} required step="0.01" placeholder="150.50" />
+                  <label>Precio de Compra (ARS)</label>
+                  <input type="number" name="precio_compra_ars" value={formData.precio_compra_ars} onChange={handleInputChange} required step="0.01" placeholder="150000" />
+                </div>
+                <div className="form-group">
+                  <label>Precio de Compra (USD)</label>
+                  <input type="number" name="precio_compra_usd" value={formData.precio_compra_usd} onChange={handleInputChange} required step="0.01" placeholder="150.50" />
                 </div>
               </div>
               

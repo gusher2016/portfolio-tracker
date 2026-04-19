@@ -44,7 +44,8 @@ class ActivoDB(Base):
     ticker = Column(String, nullable=False)
     nombre = Column(String, nullable=False)
     cantidad = Column(Float, nullable=False)
-    precio_compra = Column(Float, nullable=False)
+    precio_compra_ars = Column(Float, nullable=False)
+    precio_compra_usd = Column(Float, nullable=False)
     fecha_compra = Column(DateTime, default=datetime.now)
     # For bonds/ONs - paridad, TIR, cotizacion BYMA
     paridad = Column(Float, nullable=True)
@@ -59,7 +60,8 @@ class ActivoCreate(BaseModel):
     ticker: str
     nombre: str
     cantidad: float
-    precio_compra: float
+    precio_compra_ars: float
+    precio_compra_usd: float
     fecha_compra: Optional[datetime] = None
     paridad: Optional[float] = None
     tir: Optional[float] = None
@@ -72,21 +74,29 @@ class ActivoResponse(BaseModel):
     ticker: str
     nombre: str
     cantidad: float
-    precio_compra: float
+    precio_compra_ars: float
+    precio_compra_usd: float
     fecha_compra: Optional[datetime]
     paridad: Optional[float]
     tir: Optional[float]
     cotizacion_byma: Optional[float]
     valor_cuotaparte: Optional[float]
-    precio_actual: Optional[float] = None
-    valorizacion: Optional[float] = None
-    ganancia_perdida: Optional[float] = None
+    precio_actual_usd: Optional[float] = None
+    precio_actual_ars: Optional[float] = None
+    valorizacion_usd: Optional[float] = None
+    valorizacion_ars: Optional[float] = None
+    ganancia_perdida_usd: Optional[float] = None
+    ganancia_perdida_ars: Optional[float] = None
 
 class PortfolioSummary(BaseModel):
-    total_invertido: float
-    valor_actual: float
-    ganancia_perdida: float
-    rendimiento_porcentaje: float
+    total_invertido_ars: float
+    total_invertido_usd: float
+    valor_actual_ars: float
+    valor_actual_usd: float
+    ganancia_perdida_ars: float
+    ganancia_perdida_usd: float
+    rendimiento_porcentaje_ars: float
+    rendimiento_porcentaje_usd: float
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -236,9 +246,22 @@ def list_activos(db: Session = Depends(get_db)):
             # Use cuotaparte value for FCI
             precio_actual = activo.valor_cuotaparte or get_mock_byma_price(activo.ticker)
         
-        # Calculate values
-        valorizacion = activo.cantidad * (precio_actual or activo.precio_compra)
-        ganancia_perdida = valorizacion - (activo.cantidad * activo.precio_compra)
+        # Calculate values in ARS and USD
+        # Get current price in USD (from API)
+        precio_actual_usd = precio_actual or 0
+        # Convert to ARS using exchange rate
+        precio_actual_ars = precio_actual_usd * exchange_rate
+        
+        # Valorización
+        valorizacion_usd = activo.cantidad * precio_actual_usd
+        valorizacion_ars = activo.cantidad * precio_actual_ars
+        
+        # Ganancia/Pérdida en USD (compare USD vs USD)
+        ganancia_perdida_usd = valorizacion_usd - (activo.cantidad * activo.precio_compra_usd)
+        
+        # Ganancia/Pérdida en ARS (compare ARS vs ARS)
+        inversion_ars = activo.cantidad * activo.precio_compra_ars
+        ganancia_perdida_ars = valorizacion_ars - inversion_ars
         
         activo_response = ActivoResponse(
             id=activo.id,
@@ -246,15 +269,19 @@ def list_activos(db: Session = Depends(get_db)):
             ticker=activo.ticker,
             nombre=activo.nombre,
             cantidad=activo.cantidad,
-            precio_compra=activo.precio_compra,
+            precio_compra_ars=activo.precio_compra_ars,
+            precio_compra_usd=activo.precio_compra_usd,
             fecha_compra=activo.fecha_compra,
             paridad=activo.paridad,
             tir=activo.tir,
             cotizacion_byma=activo.cotizacion_byma,
             valor_cuotaparte=activo.valor_cuotaparte,
-            precio_actual=precio_actual,
-            valorizacion=round(valorizacion, 2),
-            ganancia_perdida=round(ganancia_perdida, 2)
+            precio_actual_usd=round(precio_actual_usd, 2),
+            precio_actual_ars=round(precio_actual_ars, 2),
+            valorizacion_usd=round(valorizacion_usd, 2),
+            valorizacion_ars=round(valorizacion_ars, 2),
+            ganancia_perdida_usd=round(ganancia_perdida_usd, 2),
+            ganancia_perdida_ars=round(ganancia_perdida_ars, 2)
         )
         result.append(activo_response)
     
@@ -268,7 +295,8 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
         ticker=activo.ticker,
         nombre=activo.nombre,
         cantidad=activo.cantidad,
-        precio_compra=activo.precio_compra,
+        precio_compra_ars=activo.precio_compra_ars,
+        precio_compra_usd=activo.precio_compra_usd,
         fecha_compra=activo.fecha_compra or datetime.now(),
         paridad=activo.paridad,
         tir=activo.tir,
@@ -279,7 +307,8 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_activo)
     
-    # Return with calculated values
+    # Get exchange rate and current price
+    exchange_rate = get_exchange_rate()
     precio_actual = None
     if db_activo.tipo in ["accion", "cedear"]:
         precio_actual = get_current_price(db_activo.ticker)
@@ -288,7 +317,13 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
     elif db_activo.tipo == "fci":
         precio_actual = db_activo.valor_cuotaparte
     
-    valorizacion = db_activo.cantidad * (precio_actual or db_activo.precio_compra)
+    # Calculate values
+    precio_actual_usd = precio_actual or 0
+    precio_actual_ars = precio_actual_usd * exchange_rate
+    valorizacion_usd = db_activo.cantidad * precio_actual_usd
+    valorizacion_ars = db_activo.cantidad * precio_actual_ars
+    ganancia_perdida_usd = valorizacion_usd - (db_activo.cantidad * db_activo.precio_compra_usd)
+    ganancia_perdida_ars = valorizacion_ars - (db_activo.cantidad * db_activo.precio_compra_ars)
     
     return ActivoResponse(
         id=db_activo.id,
@@ -296,51 +331,76 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
         ticker=db_activo.ticker,
         nombre=db_activo.nombre,
         cantidad=db_activo.cantidad,
-        precio_compra=db_activo.precio_compra,
+        precio_compra_ars=db_activo.precio_compra_ars,
+        precio_compra_usd=db_activo.precio_compra_usd,
         fecha_compra=db_activo.fecha_compra,
         paridad=db_activo.paridad,
         tir=db_activo.tir,
         cotizacion_byma=db_activo.cotizacion_byma,
         valor_cuotaparte=db_activo.valor_cuotaparte,
-        precio_actual=precio_actual,
-        valorizacion=round(valorizacion, 2),
-        ganancia_perdida=round(valorizacion - (db_activo.cantidad * db_activo.precio_compra), 2)
+        precio_actual_usd=round(precio_actual_usd, 2),
+        precio_actual_ars=round(precio_actual_ars, 2),
+        valorizacion_usd=round(valorizacion_usd, 2),
+        valorizacion_ars=round(valorizacion_ars, 2),
+        ganancia_perdida_usd=round(ganancia_perdida_usd, 2),
+        ganancia_perdida_ars=round(ganancia_perdida_ars, 2)
     )
 
 @app.get("/api/portfolio/summary", response_model=PortfolioSummary)
 def get_portfolio_summary(db: Session = Depends(get_db)):
-    """Get portfolio summary with total invested and current value"""
+    """Get portfolio summary with total invested and current value in ARS and USD"""
     activos = db.query(ActivoDB).all()
     
-    total_invertido = 0
-    valor_actual = 0
+    # Get exchange rate
+    exchange_rate = get_exchange_rate()
+    
+    total_invertido_ars = 0
+    total_invertido_usd = 0
+    valor_actual_ars = 0
+    valor_actual_usd = 0
     
     for activo in activos:
-        total_invertido += activo.cantidad * activo.precio_compra
+        # Inversion en ARS y USD
+        total_invertido_ars += activo.cantidad * activo.precio_compra_ars
+        total_invertido_usd += activo.cantidad * activo.precio_compra_usd
         
-        precio_actual = None
+        # Precio actual en USD
+        precio_actual_usd = None
         if activo.tipo in ["accion", "cedear"]:
-            precio_actual = get_current_price(activo.ticker)
-            if not precio_actual:
-                precio_actual = get_byma_price(activo.ticker, activo.tipo)
+            precio_actual_usd = get_current_price(activo.ticker)
+            if not precio_actual_usd:
+                precio_actual_usd = get_byma_price(activo.ticker, activo.tipo)
         elif activo.tipo in ["bono", "on"]:
-            precio_actual = activo.cotizacion_byma or (activo.paridad * 100 if activo.paridad else activo.precio_compra)
-            if not precio_actual or precio_actual == activo.precio_compra:
+            precio_actual_usd = activo.cotizacion_byma or (activo.paridad * 100 if activo.paridad else activo.precio_compra_usd)
+            if not precio_actual_usd:
                 byma_price = get_byma_price(activo.ticker, activo.tipo)
-                precio_actual = byma_price or activo.precio_compra
+                precio_actual_usd = byma_price or activo.precio_compra_usd
         elif activo.tipo == "fci":
-            precio_actual = activo.valor_cuotaparte or activo.precio_compra
+            precio_actual_usd = activo.valor_cuotaparte or activo.precio_compra_usd
         
-        valor_actual += activo.cantidad * (precio_actual or activo.precio_compra)
+        precio_actual_usd = precio_actual_usd or 0
+        
+        # Valorización en USD y ARS
+        valor_actual_usd += activo.cantidad * precio_actual_usd
+        valor_actual_ars += activo.cantidad * precio_actual_usd * exchange_rate
     
-    ganancia_perdida = valor_actual - total_invertido
-    rendimiento = (ganancia_perdida / total_invertido * 100) if total_invertido > 0 else 0
+    # Ganancias
+    ganancia_perdida_usd = valor_actual_usd - total_invertido_usd
+    ganancia_perdida_ars = valor_actual_ars - total_invertido_ars
+    
+    # Rendimientos
+    rendimiento_usd = (ganancia_perdida_usd / total_invertido_usd * 100) if total_invertido_usd > 0 else 0
+    rendimiento_ars = (ganancia_perdida_ars / total_invertido_ars * 100) if total_invertido_ars > 0 else 0
     
     return PortfolioSummary(
-        total_invertido=round(total_invertido, 2),
-        valor_actual=round(valor_actual, 2),
-        ganancia_perdida=round(ganancia_perdida, 2),
-        rendimiento_porcentaje=round(rendimiento, 2)
+        total_invertido_ars=round(total_invertido_ars, 2),
+        total_invertido_usd=round(total_invertido_usd, 2),
+        valor_actual_ars=round(valor_actual_ars, 2),
+        valor_actual_usd=round(valor_actual_usd, 2),
+        ganancia_perdida_ars=round(ganancia_perdida_ars, 2),
+        ganancia_perdida_usd=round(ganancia_perdida_usd, 2),
+        rendimiento_porcentaje_ars=round(rendimiento_ars, 2),
+        rendimiento_porcentaje_usd=round(rendimiento_usd, 2)
     )
 
 @app.get("/api/portfolio/by-type")
