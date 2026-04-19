@@ -90,11 +90,15 @@ function App() {
   const fetchPriceFromBackend = async (ticker, tipo) => {
     if (!ticker || !tipo) return
     
+    console.log('Fetching price for:', ticker, tipo)  // Debug
+    
     try {
       // Fetch price
       const priceRes = await axios.get(`${API_URL}/price-lookup`, {
         params: { ticker: ticker.toUpperCase(), tipo }
       })
+      
+      console.log('Price response:', priceRes.data)  // Debug
       
       // Fetch name from existing activo if available, or use ticker as name
       const activoRes = await axios.get(`${API_URL}/activos`)
@@ -110,6 +114,8 @@ function App() {
         // Default name from ticker if not found
         updates.nombre = ticker.toUpperCase()
       }
+      
+      console.log('Updates:', updates)  // Debug
       
       if (Object.keys(updates).length > 0) {
         setFormData(prev => ({ ...prev, ...updates }))
