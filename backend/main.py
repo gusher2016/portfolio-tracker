@@ -329,11 +329,14 @@ def list_activos(db: Session = Depends(get_db)):
             elif not precio_actual and activo.paridad:
                 precio_actual = activo.paridad * 100
         elif activo.tipo == "fci":
+            # For FCI, use valor_cuotaparte if set, otherwise use manual price or default
             precio_actual = activo.valor_cuotaparte
+            # If no cuotaparte value, allow 0 for display (user can update later)
         
-        # If no price available, raise error
+        # If no price available, raise error (except for FCI which can have manual entry)
         if precio_actual is None or precio_actual == 0:
-            raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}. Verifique que el ticker exista en Yahoo Finance (ej: GGAL.BA), BYMA o Rava.")
+            if activo.tipo != "fci":
+                raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}. Verifique que el ticker exista en Yahoo Finance (ej: GGAL.BA), BYMA o Rava.")
         
         precio_actual = precio_actual or 0
         
@@ -478,9 +481,10 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
         elif activo.tipo == "fci":
             precio_actual = activo.valor_cuotaparte  # In ARS
         
-        # If no price available, raise error
+        # If no price available, raise error (except for FCI which can have manual entry)
         if precio_actual is None or precio_actual == 0:
-            raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}")
+            if activo.tipo != "fci":
+                raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}")
         
         precio_actual = precio_actual or 0
         

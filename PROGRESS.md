@@ -65,7 +65,12 @@
 - ✅ Ahora funciona: 90,190 ARS (directo de BYMA)
 - El ticker AL30 no existe en Yahoo Finance, solo en BYMA
 
-### 5. Rava API
+### 5. Valor Actual ARS Total
+- ✅ Ahora funciona: 5,210,000 ARS
+- El problema era que BYMA respondía con estructura anidada `{"content": {"data": [...]}}`
+- Se arregló el parsing en `fetch_byma_prices()`
+
+### 6. Rava API
 - No está funcionando (DNS resolution failed)
 - **Investigar**: Endpoint correcto o eliminar
 
