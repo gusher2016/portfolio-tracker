@@ -312,21 +312,10 @@ function App() {
                     <th>Ticker</th>
                     <th>Nombre</th>
                     <th>Cantidad</th>
-                    {currency === 'ARS' ? (
-                      <>
-                        <th>Precio Compra ARS</th>
-                        <th>Precio Actual ARS</th>
-                        <th>Valorización ARS</th>
-                        <th>G/P ARS</th>
-                      </>
-                    ) : (
-                      <>
-                        <th>Precio Compra USD</th>
-                        <th>Precio Actual USD</th>
-                        <th>Valorización USD</th>
-                        <th>G/P USD</th>
-                      </>
-                    )}
+                    <th>Precio Compra</th>
+                    <th>Precio Actual</th>
+                    <th>Valorización</th>
+                    <th>G/P</th>
                     <th>Acciones</th>
                   </tr>
                 </thead>
