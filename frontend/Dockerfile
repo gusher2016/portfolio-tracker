@@ -2,16 +2,16 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Copy package files first
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install --legacy-peer-deps
+
 # Install serve for static file serving
 RUN npm install -g serve
 
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies with legacy-peer-deps
-RUN npm install --legacy-peer-deps
-
-# Copy source files
+# Copy all source files including index.html
 COPY . .
 
 # Build the React app
