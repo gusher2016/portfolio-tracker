@@ -5,8 +5,11 @@ WORKDIR /app
 # Install serve for static file serving
 RUN npm install -g serve
 
+# Copy package files
 COPY package*.json ./
-RUN npm install
+
+# Install dependencies - use CI=true to avoid interactive prompts
+RUN npm ci --legacy-peer-deps
 
 # Build the React app
 RUN npm run build
