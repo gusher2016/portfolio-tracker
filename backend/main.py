@@ -247,11 +247,10 @@ def list_activos(db: Session = Depends(get_db)):
             # Use cuotaparte value for FCI
             precio_actual = activo.valor_cuotaparte or get_mock_byma_price(activo.ticker)
         
-        # Calculate values in ARS and USD
-        # Get current price in USD (from API)
-        precio_actual_usd = precio_actual or 0
-        # Convert to ARS using exchange rate
-        precio_actual_ars = precio_actual_usd * exchange_rate
+        # Calculate values - Yahoo .BA returns ARS already
+        # So treat precio_actual as ARS and convert to USD
+        precio_actual_ars = precio_actual or 0
+        precio_actual_usd = precio_actual_ars / exchange_rate if exchange_rate else 0
         
         # Valorización
         valorizacion_usd = activo.cantidad * precio_actual_usd
@@ -318,9 +317,9 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
     elif db_activo.tipo == "fci":
         precio_actual = db_activo.valor_cuotaparte
     
-    # Calculate values
-    precio_actual_usd = precio_actual or 0
-    precio_actual_ars = precio_actual_usd * exchange_rate
+    # Calculate values - prices already in ARS
+    precio_actual_ars = precio_actual or 0
+    precio_actual_usd = precio_actual_ars / exchange_rate if exchange_rate else 0
     valorizacion_usd = db_activo.cantidad * precio_actual_usd
     valorizacion_ars = db_activo.cantidad * precio_actual_ars
     ganancia_perdida_usd = valorizacion_usd - (db_activo.cantidad * db_activo.precio_compra_usd)
@@ -365,25 +364,40 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
         total_invertido_ars += activo.cantidad * activo.precio_compra_ars
         total_invertido_usd += activo.cantidad * activo.precio_compra_usd
         
-        # Precio actual en USD
-        precio_actual_usd = None
+        # Get current price
+        # For acciones/cedears: Yahoo .BA returns ARS
+        # For bonos/ONs/FCI: prices are in USD
+        precio_actual = None
+        precio_from_yahoo = False
         if activo.tipo in ["accion", "cedear"]:
-            precio_actual_usd = get_current_price(activo.ticker)
-            if not precio_actual_usd:
-                precio_actual_usd = get_byma_price(activo.ticker, activo.tipo)
+            precio_actual = get_current_price(activo.ticker)  # This is in ARS
+            if precio_actual:
+                precio_from_yahoo = True
+            else:
+                precio_actual = get_byma_price(activo.ticker, activo.tipo)  # This is in USD
         elif activo.tipo in ["bono", "on"]:
-            precio_actual_usd = activo.cotizacion_byma or (activo.paridad * 100 if activo.paridad else activo.precio_compra_usd)
-            if not precio_actual_usd:
+            precio_actual = activo.cotizacion_byma or (activo.paridad * 100 if activo.paridad else activo.precio_compra_usd)
+            if not precio_actual:
                 byma_price = get_byma_price(activo.ticker, activo.tipo)
-                precio_actual_usd = byma_price or activo.precio_compra_usd
+                precio_actual = byma_price or activo.precio_compra_usd
         elif activo.tipo == "fci":
-            precio_actual_usd = activo.valor_cuotaparte or activo.precio_compra_usd
+            precio_actual = activo.valor_cuotaparte or activo.precio_compra_usd
         
-        precio_actual_usd = precio_actual_usd or 0
+        precio_actual = precio_actual or 0
+        
+        # Convert to both currencies
+        if precio_from_yahoo:
+            # Yahoo price is in ARS
+            precio_actual_ars = precio_actual
+            precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
+        else:
+            # BYMA/bond/FCI prices are in USD
+            precio_actual_usd = precio_actual
+            precio_actual_ars = precio_actual * exchange_rate
         
         # Valorización en USD y ARS
         valor_actual_usd += activo.cantidad * precio_actual_usd
-        valor_actual_ars += activo.cantidad * precio_actual_usd * exchange_rate
+        valor_actual_ars += activo.cantidad * precio_actual_ars
     
     # Ganancias
     ganancia_perdida_usd = valor_actual_usd - total_invertido_usd
@@ -408,14 +422,15 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
 def get_portfolio_by_type(db: Session = Depends(get_db)):
     """Get portfolio distribution by type"""
     activos = db.query(ActivoDB).all()
+    exchange_rate = get_exchange_rate_value()
     distribution = {}
     
     for activo in activos:
         tipo = activo.tipo
-        # Get current price in USD
         precio_actual = 0
         
         if tipo in ["accion", "cedear"]:
+            # Yahoo returns ARS, treat as ARS
             precio_actual = get_current_price(activo.ticker) or 0
         elif tipo in ["bono", "on"]:
             if activo.cotizacion_byma:
@@ -425,8 +440,13 @@ def get_portfolio_by_type(db: Session = Depends(get_db)):
         elif tipo == "fci":
             precio_actual = activo.valor_cuotaparte or 0
         
-        # Calculate value in USD
-        valor = activo.cantidad * precio_actual
+        # Calculate value in USD (convert ARS to USD for acciones/cedears)
+        if tipo in ["accion", "cedear"]:
+            # Yahoo price is in ARS
+            valor = activo.cantidad * (precio_actual / exchange_rate if exchange_rate else 0)
+        else:
+            # BYMA prices are in USD
+            valor = activo.cantidad * precio_actual
         
         if tipo in distribution:
             distribution[tipo] += valor
