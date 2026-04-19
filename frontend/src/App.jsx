@@ -142,8 +142,11 @@ function App() {
       }
 
       if (editingActivo) {
-        // Delete and recreate (simplest update approach for MVP)
-        await axios.delete(`${API_URL}/activos/${editingActivo.id}`)
+        try {
+          await axios.delete(`${API_URL}/activos/${editingActivo.id}`)
+        } catch (err) {
+          console.error('Delete error:', err)
+        }
       }
       
       await axios.post(`${API_URL}/activos`, payload)
@@ -151,7 +154,8 @@ function App() {
       setShowModal(false)
       fetchData()
     } catch (err) {
-      alert('Error al guardar: ' + err.message)
+      console.error('Error saving:', err.response?.data || err.message)
+      alert('Error al guardar: ' + (err.response?.data?.detail || err.message))
     } finally {
       setSubmitting(false)
     }
