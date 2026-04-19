@@ -221,6 +221,7 @@ def list_activos(db: Session = Depends(get_db)):
     """List all investments with current valuations"""
     activos = db.query(ActivoDB).all()
     result = []
+    exchange_rate = get_exchange_rate_value()
     
     for activo in activos:
         # Get current price based on type
@@ -308,7 +309,7 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
     db.refresh(db_activo)
     
     # Get exchange rate and current price
-    exchange_rate = get_exchange_rate()
+    exchange_rate = get_exchange_rate_value()
     precio_actual = None
     if db_activo.tipo in ["accion", "cedear"]:
         precio_actual = get_current_price(db_activo.ticker)
@@ -352,7 +353,7 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
     activos = db.query(ActivoDB).all()
     
     # Get exchange rate
-    exchange_rate = get_exchange_rate()
+    exchange_rate = get_exchange_rate_value()
     
     total_invertido_ars = 0
     total_invertido_usd = 0
@@ -420,6 +421,18 @@ def get_portfolio_by_type(db: Session = Depends(get_db)):
             distribution[tipo] = valor
     
     return [{"tipo": k, "valor": round(v, 2)} for k, v in distribution.items()]
+
+
+def get_exchange_rate_value():
+    """Get USD to ARS exchange rate as float"""
+    try:
+        response = requests.get("https://open.er-api.com/v6/latest/USD", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return float(data["rates"]["ARS"])
+    except Exception as e:
+        print(f"Error fetching exchange rate: {e}")
+    return 1360.0
 
 
 @app.get("/api/portfolio/exchange-rate")
