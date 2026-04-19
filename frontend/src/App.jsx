@@ -85,6 +85,31 @@ function App() {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
   }
+  
+  // Fetch price from backend when ticker/tipo changes
+  const fetchPriceFromBackend = async (ticker, tipo) => {
+    try {
+      const res = await axios.get(`${API_URL}/price-lookup`, {
+        params: { ticker: ticker.toUpperCase(), tipo }
+      })
+      if (res.data.precio) {
+        // Fill precio_compra_ars with the current price from BYMA
+        setFormData(prev => ({ 
+          ...prev, 
+          precio_compra_ars: res.data.precio.toFixed(2)
+        }))
+      }
+    } catch (err) {
+      console.log('Price lookup failed:', err.message)
+    }
+  }
+  
+  // Fetch price when ticker or tipo changes in form
+  useEffect(() => {
+    if (formData.ticker && formData.tipo) {
+      fetchPriceFromBackend(formData.ticker, formData.tipo)
+    }
+  }, [formData.ticker, formData.tipo])
 
   // Open modal for new investment
   const openAddModal = () => {

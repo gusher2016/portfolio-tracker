@@ -588,6 +588,31 @@ def get_exchange_rate():
     return {"rate": 1360.0, "currency": "ARS"}
 
 
+@app.get("/api/price-lookup")
+def lookup_price(ticker: str, tipo: str):
+    """Look up current price for a ticker (for form autocomplete)"""
+    precio = None
+    
+    if tipo in ["accion", "cedear"]:
+        # Try Yahoo Finance first
+        precio = get_current_price(ticker)
+        if not precio:
+            # Try BYMA as fallback
+            precio = get_byma_price(ticker, tipo)
+    elif tipo in ["bono", "on"]:
+        # Try BYMA first
+        precio = get_byma_price(ticker, tipo)
+        if not precio:
+            # Try Rava
+            precio = get_rava_price(ticker, tipo)
+    
+    return {
+        "ticker": ticker.upper(),
+        "tipo": tipo,
+        "precio": precio
+    }
+
+
 @app.delete("/api/activos/{activo_id}")
 def delete_activo(activo_id: int, db: Session = Depends(get_db)):
     """Delete an investment"""

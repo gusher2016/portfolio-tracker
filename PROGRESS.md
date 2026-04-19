@@ -74,6 +74,11 @@
 - No está funcionando (DNS resolution failed)
 - **Investigar**: Endpoint correcto o eliminar
 
+### 7. Error 400 al cargar ONs
+- ✅ Ahora funciona: permite crear ONs sin precio automático
+- Los tickers de ONs no están disponibles en BYMA (ej: YPFD no existe en la API)
+- Permitimos entrada manual de precio (valor 0 permitido)
+
 ---
 
 ## 🔧 Comandos Útiles
