@@ -192,7 +192,16 @@ def fetch_byma_prices() -> Dict[str, Dict]:
             
             if response.status_code == 200:
                 data = response.json()
-                instruments = data if isinstance(data, list) else data.get("data", [])
+                # Handle nested structure: {"content": {"data": [...]}}
+                if isinstance(data, dict):
+                    if "content" in data and "data" in data["content"]:
+                        instruments = data["content"]["data"]
+                    elif "data" in data:
+                        instruments = data["data"]
+                    else:
+                        instruments = []
+                else:
+                    instruments = data if isinstance(data, list) else []
                 
                 for inst in instruments:
                     symbol = inst.get("symbol", "").strip().upper()
