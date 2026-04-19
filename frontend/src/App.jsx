@@ -88,9 +88,7 @@ function App() {
   
   // Fetch price and name from backend when ticker/tipo changes
   const fetchPriceFromBackend = async (ticker, tipo) => {
-    if (!ticker || !tipo) return
-    
-    console.log('Fetching price for:', ticker, tipo)  // Debug
+    if (!ticker || !tipo || ticker.length < 2) return
     
     try {
       // Fetch price
@@ -98,28 +96,16 @@ function App() {
         params: { ticker: ticker.toUpperCase(), tipo }
       })
       
-      console.log('Price response:', priceRes.data)  // Debug
-      
-      // Fetch name from existing activo if available, or use ticker as name
+      // Fetch name from existing activo if available
       const activoRes = await axios.get(`${API_URL}/activos`)
       const existing = activoRes.data.find(a => a.ticker.toUpperCase() === ticker.toUpperCase() && a.tipo === tipo)
       
-      const updates = {}
-      if (priceRes.data.precio) {
-        updates.precio_compra_ars = priceRes.data.precio.toFixed(2)
-      }
-      if (existing && existing.nombre) {
-        updates.nombre = existing.nombre
-      } else if (ticker.length >= 3) {
-        // Default name from ticker if not found
-        updates.nombre = ticker.toUpperCase()
-      }
-      
-      console.log('Updates:', updates)  // Debug
-      
-      if (Object.keys(updates).length > 0) {
-        setFormData(prev => ({ ...prev, ...updates }))
-      }
+      // Always update price (allow overwriting) and name if empty
+      setFormData(prev => ({
+        ...prev,
+        precio_compra_ars: priceRes.data.precio ? priceRes.data.precio.toFixed(2) : prev.precio_compra_ars,
+        nombre: (existing?.nombre) || (ticker.length >= 3 ? ticker.toUpperCase() : prev.nombre) || prev.nombre
+      }))
     } catch (err) {
       console.log('Price lookup failed:', err.message)
     }
