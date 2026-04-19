@@ -178,6 +178,7 @@ def fetch_byma_prices() -> Dict[str, Dict]:
     
     for tipo, url in BYMA_ENDPOINTS.items():
         try:
+            print(f"Fetching {tipo} from {url}...")  # Debug
             headers = {
                 "Accept": "application/json",
                 "User-Agent": "Mozilla/5.0"
@@ -189,11 +190,18 @@ def fetch_byma_prices() -> Dict[str, Dict]:
                 timeout=30,
                 verify=False  # Ignore SSL cert issues
             )
+            print(f"Status {tipo}: {response.status_code}, len: {len(response.text)}")  # Debug
             
             if response.status_code == 200:
                 data = response.json()
-                # Handle nested structure: {"content": {"data": [...]}}
-                if isinstance(data, dict):
+                print(f"Data type for {tipo}: {type(data)}")  # Debug
+                # Handle different response structures:
+                # - ONs: returns list directly
+                # - Bonds/CEDEARs: returns {"content": {"data": [...]}}
+                if isinstance(data, list):
+                    instruments = data
+                    print(f"List length for {tipo}: {len(instruments)}")
+                elif isinstance(data, dict):
                     if "content" in data and "data" in data["content"]:
                         instruments = data["content"]["data"]
                     elif "data" in data:
@@ -201,7 +209,7 @@ def fetch_byma_prices() -> Dict[str, Dict]:
                     else:
                         instruments = []
                 else:
-                    instruments = data if isinstance(data, list) else []
+                    instruments = []
                 
                 for inst in instruments:
                     symbol = inst.get("symbol", "").strip().upper()
@@ -210,7 +218,12 @@ def fetch_byma_prices() -> Dict[str, Dict]:
                         price = inst.get("trade") or inst.get("settlementPrice") or inst.get("previousClosingPrice")
                         if price and float(price) > 0:
                             byma_cache[tipo][symbol] = float(price)
+                
                 print(f"Fetched {len(byma_cache[tipo])} {tipo} from BYMA API")
+                # Debug: check for YPF
+                if tipo == "on":
+                    ypf_matches = [k for k in byma_cache[tipo].keys() if 'YPF' in k]
+                    print(f"YPF matches in {tipo}: {ypf_matches[:5]}")
             else:
                 print(f"BYMA API error for {tipo}: {response.status_code}")
         except Exception as e:
@@ -333,9 +346,9 @@ def list_activos(db: Session = Depends(get_db)):
             precio_actual = activo.valor_cuotaparte
             # If no cuotaparte value, allow 0 for display (user can update later)
         
-        # If no price available, raise error (except for FCI which can have manual entry)
+        # If no price available, raise error (except for FCI and ON which can have manual entry)
         if precio_actual is None or precio_actual == 0:
-            if activo.tipo != "fci":
+            if activo.tipo not in ["fci", "on"]:
                 raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}. Verifique que el ticker exista en Yahoo Finance (ej: GGAL.BA), BYMA o Rava.")
         
         precio_actual = precio_actual or 0
@@ -481,9 +494,9 @@ def get_portfolio_summary(db: Session = Depends(get_db)):
         elif activo.tipo == "fci":
             precio_actual = activo.valor_cuotaparte  # In ARS
         
-        # If no price available, raise error (except for FCI which can have manual entry)
+        # If no price available, raise error (except for FCI and ON which can have manual entry)
         if precio_actual is None or precio_actual == 0:
-            if activo.tipo != "fci":
+            if activo.tipo not in ["fci", "on"]:
                 raise HTTPException(status_code=400, detail=f"No se pudo obtener precio para {activo.ticker}")
         
         precio_actual = precio_actual or 0
