@@ -312,11 +312,21 @@ function App() {
                     <th>Ticker</th>
                     <th>Nombre</th>
                     <th>Cantidad</th>
-                    <th>Precio Compra ARS</th>
-                    <th>Precio Compra USD</th>
-                    <th>Precio Actual USD</th>
-                    <th>Valorización USD</th>
-                    <th>G/P USD</th>
+                    {currency === 'ARS' ? (
+                      <>
+                        <th>Precio Compra ARS</th>
+                        <th>Precio Actual ARS</th>
+                        <th>Valorización ARS</th>
+                        <th>G/P ARS</th>
+                      </>
+                    ) : (
+                      <>
+                        <th>Precio Compra USD</th>
+                        <th>Precio Actual USD</th>
+                        <th>Valorización USD</th>
+                        <th>G/P USD</th>
+                      </>
+                    )}
                     <th>Acciones</th>
                   </tr>
                 </thead>
@@ -327,13 +337,25 @@ function App() {
                       <td>{activo.ticker}</td>
                       <td>{activo.nombre}</td>
                       <td>{activo.cantidad.toFixed(2)}</td>
-                      <td>{formatCurrency(activo.precio_compra_ars)}</td>
-                      <td>{formatCurrency(activo.precio_compra_usd)}</td>
-                      <td>{activo.precio_actual_usd ? formatCurrency(activo.precio_actual_usd) : '-'}</td>
-                      <td>{formatCurrency(activo.valorizacion_usd || 0)}</td>
-                      <td className={activo.ganancia_perdida_usd >= 0 ? 'positive' : 'negative'}>
-                        {formatCurrency(activo.ganancia_perdida_usd || 0)}
-                      </td>
+                      {currency === 'ARS' ? (
+                        <>
+                          <td>{formatCurrency(activo.precio_compra_ars)}</td>
+                          <td>{activo.precio_actual_ars ? formatCurrency(activo.precio_actual_ars) : '-'}</td>
+                          <td>{formatCurrency(activo.valorizacion_ars || 0)}</td>
+                          <td className={activo.ganancia_perdida_ars >= 0 ? 'positive' : 'negative'}>
+                            {formatCurrency(activo.ganancia_perdida_ars || 0)}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td>{formatCurrency(activo.precio_compra_usd)}</td>
+                          <td>{activo.precio_actual_usd ? formatCurrency(activo.precio_actual_usd) : '-'}</td>
+                          <td>{formatCurrency(activo.valorizacion_usd || 0)}</td>
+                          <td className={activo.ganancia_perdida_usd >= 0 ? 'positive' : 'negative'}>
+                            {formatCurrency(activo.ganancia_perdida_usd || 0)}
+                          </td>
+                        </>
+                      )}
                       <td>
                         <div className="action-buttons">
                           <button className="btn btn-small" onClick={() => openEditModal(activo)}>✏️</button>
