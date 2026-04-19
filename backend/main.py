@@ -226,14 +226,17 @@ def list_activos(db: Session = Depends(get_db)):
     for activo in activos:
         # Get current price based on type
         precio_actual = None
+        precio_from_yahoo = False
         
         if activo.tipo in ["accion", "cedear"]:
             # Try Yahoo Finance first, then BYMA
-            precio_actual = get_current_price(activo.ticker)
-            if not precio_actual:
-                precio_actual = get_byma_price(activo.ticker, activo.tipo)
+            precio_actual = get_current_price(activo.ticker)  # Returns ARS
+            if precio_actual:
+                precio_from_yahoo = True
+            else:
+                precio_actual = get_byma_price(activo.ticker, activo.tipo)  # Returns USD
         elif activo.tipo in ["bono", "on"]:
-            # Use BYMA price or paridad * 100 for bonds
+            # Use BYMA price or paridad * 100 for bonds - these are in USD
             if activo.cotizacion_byma:
                 precio_actual = activo.cotizacion_byma
             elif activo.paridad:
@@ -244,13 +247,18 @@ def list_activos(db: Session = Depends(get_db)):
                 if not precio_actual:
                     precio_actual = get_mock_byma_price(activo.ticker)
         elif activo.tipo == "fci":
-            # Use cuotaparte value for FCI
+            # Use cuotaparte value for FCI - in USD
             precio_actual = activo.valor_cuotaparte or get_mock_byma_price(activo.ticker)
         
-        # Calculate values - Yahoo .BA returns ARS already
-        # So treat precio_actual as ARS and convert to USD
-        precio_actual_ars = precio_actual or 0
-        precio_actual_usd = precio_actual_ars / exchange_rate if exchange_rate else 0
+        precio_actual = precio_actual or 0
+        
+        # Convert to both currencies - Yahoo returns ARS, BYMA/bonds return USD
+        if precio_from_yahoo:
+            precio_actual_ars = precio_actual
+            precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
+        else:
+            precio_actual_usd = precio_actual
+            precio_actual_ars = precio_actual * exchange_rate
         
         # Valorización
         valorizacion_usd = activo.cantidad * precio_actual_usd
@@ -310,16 +318,28 @@ def create_activo(activo: ActivoCreate, db: Session = Depends(get_db)):
     # Get exchange rate and current price
     exchange_rate = get_exchange_rate_value()
     precio_actual = None
+    precio_from_yahoo = False
     if db_activo.tipo in ["accion", "cedear"]:
-        precio_actual = get_current_price(db_activo.ticker)
+        precio_actual = get_current_price(db_activo.ticker)  # Returns ARS
+        if precio_actual:
+            precio_from_yahoo = True
     elif db_activo.tipo in ["bono", "on"]:
-        precio_actual = db_activo.cotizacion_byma or (db_activo.paridad * 100 if db_activo.paridad else None)
+        precio_actual = db_activo.cotizacion_byma or (db_activo.paridad * 100 if db_activo.paridad else None)  # In USD
     elif db_activo.tipo == "fci":
-        precio_actual = db_activo.valor_cuotaparte
+        precio_actual = db_activo.valor_cuotaparte  # In USD
     
-    # Calculate values - prices already in ARS
-    precio_actual_ars = precio_actual or 0
-    precio_actual_usd = precio_actual_ars / exchange_rate if exchange_rate else 0
+    precio_actual = precio_actual or 0
+    
+    # Convert to both currencies
+    # Yahoo .BA returns ARS, BYMA/bonds/FCI returns USD
+    if precio_from_yahoo:
+        # Yahoo price is in ARS
+        precio_actual_ars = precio_actual
+        precio_actual_usd = precio_actual / exchange_rate if exchange_rate else 0
+    else:
+        # BYMA/bond/FCI prices are in USD
+        precio_actual_usd = precio_actual
+        precio_actual_ars = precio_actual * exchange_rate
     valorizacion_usd = db_activo.cantidad * precio_actual_usd
     valorizacion_ars = db_activo.cantidad * precio_actual_ars
     ganancia_perdida_usd = valorizacion_usd - (db_activo.cantidad * db_activo.precio_compra_usd)
